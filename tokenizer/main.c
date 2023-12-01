@@ -44,49 +44,35 @@ static char symb_to_char(char symb) {
             return '\n';
         case 't':
             return '\t';
-        case '"':
-            return '\"';
         default:
             return symb;
     }
 }
 
-static char *parse_str_quotas(char *str)
+static char *parse_spec_chars(char *str)
 {
     if (str == NULL) {
         return NULL;
     }
     
     uint str_len = CORE_StrLen(str);
-
-    const char *str_end = str + str_len;
-    char *str_left = (char *) CORE_StrFindEnd(str, str_end - str, "\"", 1);
-    if (str_left == NULL) {
-        return NULL;
-    }
-    char *str_right = (char *) CORE_StrFindEnd(str_left, str_end - str_left, "\"", 1);
-    if (str_right == NULL) {
-        return NULL;
-    }
-    str_right--;
-    *str_right = '\0';
-
     char buff[str_len + 1];
     buff[0] = 0;
     uint buff_len = 0;
+    char *str_orig = str;
 
     char c = 0;
-    while ((c = *str_left++) != '\0') {
-        if ((*str_left != '\0') && (c == '\\')) {
-            c = symb_to_char(*str_left);
-            str_left++;
+    while ((c = *str++) != '\0') {
+        if ((*str != '\0') && (c == '\\')) {
+            c = symb_to_char(*str);
+            str++;
         }
 
         buff[buff_len++] = c;
     }
     buff[buff_len] = '\0';
-    CORE_StrCpy(str, str_len, buff);
-    return str;
+    CORE_StrCpy(str_orig, str_len + 1, buff);
+    return str_orig;
 }
 
 static void process_read()
@@ -141,19 +127,19 @@ static void split_buffer_to_records()
     char *fields_separators = command_args[1];
     char *record_separator = command_args[2];
     if ((fields_separators == NULL) || (record_separator == NULL)) {
-        printf("Wrong SPLIT usage. Format: s \"[fields separators]\" \"[record separator]\"\n");
+        printf("Wrong SPLIT usage. Format: s [fields separators] [record separator]\n");
         return;
     }
 
-    fields_separators = parse_str_quotas(fields_separators);
-    record_separator = parse_str_quotas(record_separator);
+    fields_separators = parse_spec_chars(fields_separators);
+    record_separator = parse_spec_chars(record_separator);
 
     if ((fields_separators == NULL) || (record_separator == NULL)) {
-        printf("Wrong SPLIT usage. Format: s \"[fields separators]\" \"[record separator]\"\n");
+        printf("Wrong SPLIT usage. Format: s [fields separators] [record separator]\n");
         return;
     }
 
-    printf("Splited BUFFER:\n\tFields Separators: `%s`\n\tRecord Separator: `%s`\n", fields_separators, record_separator);
+    printf("BUFFER Splited. Use `t` command to see records\n");
 
     buff_records_clear();
     buff_records = CORE_StrSplitToRecords(buff, fields_separators, record_separator[0]);
@@ -201,6 +187,16 @@ static void print_tokens()
     return;
 }
 
+void print_help(void)
+{
+    printf("Commands:\n");
+    printf("  r[read]: read buffer\n");
+    printf("  b[uffer]: print buffer\n");
+    printf("  s[plit]: split buffer into records\n");
+    printf("  t[okens]: print tokens\n");
+    printf("  q[uit]: quit\n");
+}
+
 int main() 
 {
     while (1) {
@@ -230,6 +226,8 @@ int main()
             print_tokens();
             continue;
         }
+        
+        print_help();
     }
 
     buff_records_clear();
