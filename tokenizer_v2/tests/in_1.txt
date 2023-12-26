@@ -1,0 +1,18 @@
+ import { applyDmgPercent } from '../../../calc' import { makeHit } from '../../../hit';
+import { ShipSystem } from '../../types';
+import empoweredBlastSystemMeta from './empowered-blast.json';
+
+export const EmpoweredBlast = (): ShipSystem => ({
+  ...empoweredBlastSystemMeta,
+  type: 'battle',
+  targets: 'single',
+  charges: 5,
+  maxCharges: 5,
+  use({ sourceName, sourceStats, aliveTargets }) {
+    const target = aliveTargets[0];
+    sourceStats.hitChance -= 20;
+    applyDmgPercent(sourceStats, 300);
+    makeHit(sourceName, sourceStats, target);
+  },
+});
+
