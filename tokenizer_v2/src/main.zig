@@ -17,7 +17,7 @@ fn readFile(allocator: Allocator, file_name: string_view) ![]string_view {
     var buffered = std.io.bufferedReader(file.reader());
     var reader = buffered.reader();
     var buf: [2048]u8 = undefined;
-    var list = std.ArrayList([]u8).init(allocator);
+    var list = std.ArrayList(string).init(allocator);
     errdefer list.deinit();
     while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line_raw| {
         var line_copy = try allocator.dupe(u8, line_raw);
@@ -49,35 +49,62 @@ const State = struct {
             .data_list = .{ .s = allocator.alloc(u8, 1) catch oom() },
         };
     }
+
+    pub fn deinit(self: *State) void {
+        self.args.deinit();
+        clearListItem(self.allocator, &self.data_list);
+    }
 };
 
-fn printDataList(data_list: *const ListItem) void {
+const DEFAULT_MAX_STR_SIZE = 30;
+
+fn printListItem(data_list: *const ListItem, max_str_size: ?u32) void {
     switch (data_list.*) {
         ListItem.s => |s| {
-            if (s.len <= 30) {
+            var max_str_size_v = max_str_size orelse {
+                debug.print("\"{s}\", ", .{s});
+                return;
+            };
+            if (s.len <= max_str_size_v) {
                 debug.print("\"{s}\", ", .{s});
             } else {
-                debug.print("\"{s}...\", ", .{s[0..30]});
+                debug.print("\"{s}...\", ", .{s[0..max_str_size_v]});
             }
         },
         ListItem.list => |ls| {
             debug.print("[ ", .{});
             for (ls) |*l| {
-                printDataList(l);
+                printListItem(l, max_str_size);
             }
             debug.print("]", .{});
         },
     }
 }
 
-fn isOrigArg(in_arg: string_view) bool {
+fn printState(state: *const State) void {
+    var in_arg = state.args.items[0];
+    var max_str_size: ?u32 = if (state.args.items.len > 1 and mem.eql(u8, state.args.items[1], "full")) null else DEFAULT_MAX_STR_SIZE;
+    if (isWholeDataListArg(in_arg)) {
+        printListItem(&state.data_list, max_str_size);
+        debug.print("\n", .{});
+        return;
+    }
+
+    var list_item = getArgListItem(state.allocator, in_arg, state) orelse return;
+    printListItem(list_item, max_str_size);
+    debug.print("\n", .{});
+
+    return;
+}
+
+fn isWholeDataListArg(in_arg: string_view) bool {
     if (in_arg.len != 2) {
         return false;
     }
     return in_arg[0] == '@' and in_arg[1] == '0';
 }
 
-fn getArgListItem(allocator: Allocator, arg: string_view, state: *State) ?*ListItem {
+fn getArgListItem(allocator: Allocator, arg: string_view, state: *const State) ?*ListItem {
     _ = allocator;
     if (arg[0] != '@') {
         debug.print("Unknown arg #1\n", .{});
@@ -134,10 +161,10 @@ fn splitBy(allocator: Allocator, state: *State) void {
     }
 
     var in_arg = state.args.items[0];
-    var is_orig_arg = isOrigArg(in_arg);
+    var is_whole_data_list = isWholeDataListArg(in_arg);
     var str_to_process: string_view = undefined;
     var list_to_update: *ListItem = undefined;
-    if (is_orig_arg) {
+    if (is_whole_data_list) {
         list_to_update = &state.data_list;
     } else {
         list_to_update = getArgListItem(allocator, in_arg, state) orelse return;
@@ -162,12 +189,14 @@ fn splitBy(allocator: Allocator, state: *State) void {
     if (mem.eql(u8, split_type, "seq")) {
         var iter = mem.tokenizeSequence(u8, str_to_process, tokens);
         while (iter.next()) |part_of_s| {
-            new_list_arr.append(allocator.dupe(u8, part_of_s) catch oom()) catch oom();
+            var s_trimmed = mem.trim(u8, part_of_s, "\n\r\t ");
+            new_list_arr.append(s_trimmed) catch oom();
         }
     } else if (mem.eql(u8, split_type, "any")) {
         var iter = mem.tokenizeAny(u8, str_to_process, tokens);
         while (iter.next()) |part_of_s| {
-            new_list_arr.append(allocator.dupe(u8, part_of_s) catch oom()) catch oom();
+            var s_trimmed = mem.trim(u8, part_of_s, "\n\r\t ");
+            new_list_arr.append(s_trimmed) catch oom();
         }
     }
 
@@ -175,7 +204,7 @@ fn splitBy(allocator: Allocator, state: *State) void {
     list_to_update.* = .{ .list = v };
 
     for (new_list_arr.items, 0..) |str, s_i| {
-        list_to_update.list[s_i] = .{ .s = str };
+        list_to_update.list[s_i] = .{ .s = allocator.dupe(u8, str) catch oom() };
     }
 }
 
@@ -209,10 +238,29 @@ fn clearListItem(allocator: Allocator, list_item: *ListItem) void {
             allocator.free(ls);
         },
         ListItem.s => |s| {
-            _ = s;
-            //allocator.free(s);
+            allocator.free(s);
         },
     }
+}
+
+fn fileRead(state: *State) void {
+    var lines = readFile(state.allocator, state.args.items[0]) catch {
+        debug.print("fread error\n", .{});
+        return;
+    };
+    defer {
+        for (lines) |line| {
+            state.allocator.free(line);
+        }
+        state.allocator.free(lines);
+    }
+    var str = std.ArrayList(u8).init(state.allocator);
+    for (lines) |line| {
+        str.appendSlice(line) catch oom();
+        str.append('\n') catch oom();
+    }
+    var s = str.toOwnedSlice() catch oom();
+    state.data_list.s = s;
 }
 
 fn processInput(allocator: Allocator, command: string_view, state: *State) void {
@@ -234,28 +282,7 @@ fn processInput(allocator: Allocator, command: string_view, state: *State) void 
 
     // call specific function
     if (mem.eql(u8, function_name, "fread")) {
-        var lines = readFile(allocator, state.args.items[0]) catch {
-            debug.print("fread error\n", .{});
-            return;
-        };
-        defer {
-            for (lines) |line| {
-                allocator.free(line);
-            }
-            allocator.free(lines);
-        }
-        var str = std.ArrayList(u8).init(allocator);
-        for (lines) |line| {
-            str.appendSlice(line) catch oom();
-            str.append('\n') catch oom();
-        }
-        var s = str.toOwnedSlice() catch oom();
-        state.data_list.s = s;
-        return;
-    }
-    if (mem.eql(u8, function_name, "print")) {
-        printDataList(&state.data_list);
-        debug.print("\n", .{});
+        fileRead(state);
         return;
     }
     if (mem.eql(u8, function_name, "spl")) {
@@ -264,6 +291,10 @@ fn processInput(allocator: Allocator, command: string_view, state: *State) void 
     }
     if (mem.eql(u8, function_name, "take")) {
         take(allocator, state);
+        return;
+    }
+    if (mem.eql(u8, function_name, "print")) {
+        printState(state);
         return;
     }
 }
@@ -295,5 +326,23 @@ pub fn main() !void {
 }
 
 test "simple test" {
-    try init(std.testing.allocator);
+    var allocator = std.testing.allocator;
+    const stdin = std.io.getStdIn().reader();
+    _ = stdin;
+    var buf: [1024]u8 = undefined;
+    _ = buf;
+
+    var state = State.init(allocator);
+    defer state.deinit();
+
+    var lines = try readFile(allocator, "tests/cmds_1.txt");
+    defer {
+        for (lines) |line| {
+            allocator.free(line);
+        }
+        allocator.free(lines);
+    }
+    for (lines) |line| {
+        processInput(allocator, line, &state);
+    }
 }

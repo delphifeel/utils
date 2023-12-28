@@ -1,0 +1,4 @@
+tests/in_1.txt fread
+@0 spl seq ({
+@2 only
+@1 spl any :,

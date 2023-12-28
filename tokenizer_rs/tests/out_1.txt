@@ -1,0 +1,5 @@
+{
+  "targets": "single",
+  "charges": 5,
+  "maxCharges": 5
+}
