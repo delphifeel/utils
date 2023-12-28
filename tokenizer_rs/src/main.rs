@@ -30,30 +30,116 @@ fn read_file(file_name: &str) -> Option<String> {
     return Some(contents);
 }
 
-fn get_arg1_list_index(arg_opt: Option<&String>) -> Option<usize> {
-    if let Some(arg1) = arg_opt {
-        match arg1.get(0..1) {
-            Some("@") => {
-                let s = match arg1.get(1..) {
-                    Some(s) => s,
-                    None => {
-                        eprintln!("Wrong format for Arg #1: @N expected");
-                        return None;
-                    }
-                };
+fn leave_only_arg1(state: &mut State) {
+    let Some(arg1) = state.args.get(0) else {
+        eprintln!("Arg #1 is missing");
+        return;
+    };
 
-                let i: usize = s.parse().unwrap();
-                return Some(i);
-            }
-            _ => {
+    let i = match arg1.get(0..1) {
+        Some("@") => {
+            let Some(s) = arg1.get(1..) else {
                 eprintln!("Wrong format for Arg #1: @N expected");
-                return None;
+                return;
+            };
+
+            let i: usize = s.parse().unwrap();
+            match i {
+                0 => {
+                    eprintln!("@0 only has no effect");
+                    return;
+                }
+                _ => i - 1,
             }
-        };
-    } else {
+        }
+        _ => {
+            eprintln!("Wrong format for Arg #1: @N expected");
+            return;
+        }
+    };
+
+    state.data_list = match state.data_list {
+        ListItem::Str(_) => {
+            eprintln!("Expected list, got string");
+            return;
+        }
+        ListItem::List(ref mut ls) => {
+            let a = ls.swap_remove(i);
+            a
+        }
+    }
+}
+
+fn get_arg1_list(state: &State) -> Option<&ListItem> {
+    let Some(arg1) = state.args.get(0) else {
         eprintln!("Arg #1 is missing");
         return None;
-    }
+    };
+
+    match arg1.get(0..1) {
+        Some("@") => {
+            let Some(s) = arg1.get(1..) else {
+                eprintln!("Wrong format for Arg #1: @N expected");
+                return None;
+            };
+
+            let i: usize = s.parse().unwrap();
+            match i {
+                0 => return Some(&state.data_list),
+                _ => {
+                    let ListItem::List(ref ls) = state.data_list else {
+                        eprintln!("Expected list, got string");
+                        return None;
+                    };
+                    let Some(l) = ls.get(i - 1) else {
+                        eprintln!("List {} is missing", i);
+                        return None;
+                    };
+                    return Some(l);
+                }
+            }
+        }
+        _ => {
+            eprintln!("Wrong format for Arg #1: @N expected");
+            return None;
+        }
+    };
+}
+
+fn get_arg1_list_mut(state: &mut State) -> Option<&mut ListItem> {
+    let Some(arg1) = state.args.get(0) else {
+        eprintln!("Arg #1 is missing");
+        return None;
+    };
+
+    match arg1.get(0..1) {
+        Some("@") => {
+            let Some(s) = arg1.get(1..) else {
+                eprintln!("Wrong format for Arg #1: @N expected");
+                return None;
+            };
+
+            let i: usize = s.parse().unwrap();
+            match i {
+                0 => return Some(&mut state.data_list),
+                _ => {
+                    let ListItem::List(ref mut ls) = state.data_list else {
+                        eprintln!("Expected list, got string");
+                        return None;
+                    };
+                    let Some(l) = ls.get_mut(i - 1) else {
+                        eprintln!("List {} is missing", i);
+                        return None;
+                    };
+                    return Some(l);
+                }
+            }
+        }
+        _ => {
+            eprintln!("Wrong format for Arg #1: @N expected");
+            return None;
+        }
+    };
 }
 
 const DEFAULT_MAX_PRINT_STR_SIZE: usize = 30;
@@ -76,17 +162,9 @@ fn print_list_item(list_item: &ListItem, max_str_size: Option<usize>) {
 }
 
 // @1 print full
-fn print_data_list(state: &State) {
-    let list_item = match get_arg1_list_index(state.args.get(0)) {
-        Some(list_pos) if list_pos == 0 => &state.data_list,
-        Some(list_pos) => match state.data_list {
-            ListItem::Str(_) => {
-                eprintln!("Expected list, got string");
-                return;
-            }
-            ListItem::List(ref ls) => ls.get(list_pos - 1).unwrap(),
-        },
-        None => return,
+fn print_data_list(state: &mut State) {
+    let Some(list_item) = get_arg1_list(state) else {
+        return;
     };
 
     if state.args.get(1).is_some_and(|s| s == "full") {
@@ -118,29 +196,6 @@ fn file_read(state: &mut State) {
 // - @0 spl seq ({
 // - @1 spl any :,
 fn split(state: &mut State) {
-    let arg1 = match get_arg1_list_index(state.args.get(0)) {
-        Some(v) => v,
-        None => return,
-    };
-
-    let (str_to_process, i_to_change) = match (arg1, &state.data_list) {
-        (0, ListItem::Str(ref s)) => (s, None),
-        (i_v, ListItem::List(ref ls)) => {
-            let item = ls.get(i_v - 1).unwrap();
-            match item {
-                ListItem::Str(s) => (s, Some(i_v - 1)),
-                _ => {
-                    eprintln!("Expected string got list");
-                    return;
-                }
-            }
-        }
-        _ => {
-            eprintln!("Expected string got list");
-            return;
-        }
-    };
-
     let split_type = match state.args.get(1) {
         Some(s) => s,
         None => {
@@ -156,6 +211,15 @@ fn split(state: &mut State) {
         }
     };
 
+    let Some(list_to_process) = get_arg1_list(state) else {
+        return;
+    };
+
+    let ListItem::Str(str_to_process) = list_to_process else {
+        eprintln!("Expected string, got list");
+        return;
+    };
+
     let mut new_list: Vec<ListItem> = Vec::new();
     match split_type.as_str() {
         "seq" => {
@@ -164,7 +228,7 @@ fn split(state: &mut State) {
             }
         }
         "any" => {
-            for s in str_to_process.split(tokens.as_str()) {
+            for s in str_to_process.split(|c| tokens.contains(c)) {
                 new_list.push(ListItem::Str(s.to_owned()));
             }
         }
@@ -173,41 +237,35 @@ fn split(state: &mut State) {
             return;
         }
     };
-
-    match i_to_change {
-        None => {
-            state.data_list = ListItem::List(new_list);
-        }
-        Some(i) => match state.data_list {
-            ListItem::Str(_) => {
-                eprintln!("Expected list got string");
-                return;
-            }
-            ListItem::List(ref mut ls) => match ls.get_mut(i) {
-                Some(list_to_change) => {
-                    *list_to_change = ListItem::List(new_list);
-                }
-                None => {
-                    eprintln!("List does'nt have {} item", i);
-                    return;
-                }
-            },
-        },
-    }
+    let Some(list_to_change) = get_arg1_list_mut(state) else {
+        return;
+    };
+    *list_to_change = ListItem::List(new_list);
 }
 
 // Leave only specific list items
 // Example:
 // - @1 only
 fn only(state: &mut State) {
-    let arg1 = match get_arg1_list_index(state.args.get(0)) {
-        Some(arg1) if arg1 == 0 => {
-            eprintln!("@0 only have no effect");
-            return;
+    leave_only_arg1(state);
+}
+
+// Trim strings in list
+// Example:
+// - @1 trim
+fn trim(state: &mut State) {
+    let Some(list_to_change) = get_arg1_list_mut(state) else {
+        return;
+    };
+    let ListItem::List(list_to_change) = list_to_change else {
+        eprintln!("Expected list, got string");
+        return;
+    };
+    for item in list_to_change.iter_mut() {
+        if let ListItem::Str(item_as_str) = item {
+            *item_as_str = item_as_str.trim().to_owned();
         }
-        None => return,
-        Some(arg1) => arg1,
-    } - 1;
+    }
 }
 
 fn process_input(input: String, state: &mut State) {
@@ -239,6 +297,7 @@ fn process_input(input: String, state: &mut State) {
         "fread" => file_read(state),
         "spl" => split(state),
         "only" => only(state),
+        "trim" => trim(state),
         _ => eprintln!("Unknown function name: {}", function_name),
     };
 }
