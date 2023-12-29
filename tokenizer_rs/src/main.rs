@@ -261,11 +261,18 @@ fn trim(state: &mut State) {
         eprintln!("Expected list, got string");
         return;
     };
-    for item in list_to_change.iter_mut() {
-        if let ListItem::Str(item_as_str) = item {
-            *item_as_str = item_as_str.trim().to_owned();
+    list_to_change.retain_mut(|item| match item {
+        ListItem::Str(item_as_str) => {
+            let new_str = item_as_str.trim().to_owned();
+            if new_str.is_empty() {
+                return false;
+            } else {
+                *item_as_str = new_str;
+                return true;
+            }
         }
-    }
+        ListItem::List(_) => return true,
+    });
 }
 
 fn process_input(input: String, state: &mut State) {
