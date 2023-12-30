@@ -70,74 +70,131 @@ fn leave_only_arg1(state: &mut State) {
     }
 }
 
-fn get_arg1_list(state: &State) -> Option<&ListItem> {
+// Arg 1 possible values:
+// - @0 - mean whole data list
+// - @N - Nth list
+// - @N{a,b,c} - list subset of a, b, c strings
+fn get_arg1_list(state: &State) -> Vec<&ListItem> {
     let Some(arg1) = state.args.get(0) else {
         eprintln!("Arg #1 is missing");
-        return None;
+        return Vec::new();
     };
 
     match arg1.get(0..1) {
         Some("@") => {
             let Some(s) = arg1.get(1..) else {
                 eprintln!("Wrong format for Arg #1: @N expected");
-                return None;
+                return Vec::new();
             };
 
-            let i: usize = s.parse().unwrap();
-            match i {
-                0 => return Some(&state.data_list),
+            let mut iter = s.split("{");
+            let Some(number_str) = iter.next() else {
+                eprintln!("Wrong arg format");
+                return Vec::new();
+            };
+            let i: usize = number_str.parse().unwrap();
+
+            let list_to_return = match i {
+                0 => &state.data_list,
                 _ => {
                     let ListItem::List(ref ls) = state.data_list else {
                         eprintln!("Expected list, got string");
-                        return None;
+                        return Vec::new();
                     };
                     let Some(l) = ls.get(i - 1) else {
-                        eprintln!("List {} is missing", i);
-                        return None;
+                        eprintln!("List #{} is missing", i);
+                        return Vec::new();
                     };
-                    return Some(l);
+                    l
                 }
-            }
+            };
+            // if @N{a,b,c}
+            let Some(keys) = iter.next() else {
+                return vec![list_to_return];
+            };
+            let iter = keys.split(|c| c == ',' || c == '}');
+            let mut keys_to_test: Vec<&str> = iter.collect();
+            keys_to_test.remove(keys_to_test.len() - 1);
+            let ListItem::List(ls) = list_to_return else {
+                eprintln!("Expect list, got string");
+                return Vec::new();
+            };
+            return ls
+                .iter()
+                .filter(|item| {
+                    let ListItem::Str(item_str) = item else {
+                        return false;
+                    };
+                    return keys_to_test.contains(&item_str.as_str());
+                })
+                .collect();
         }
         _ => {
             eprintln!("Wrong format for Arg #1: @N expected");
-            return None;
+            return Vec::new();
         }
     };
 }
 
-fn get_arg1_list_mut(state: &mut State) -> Option<&mut ListItem> {
+// TODO: return list and indecses
+fn get_arg1_list_mut(state: &mut State) -> Vec<&mut ListItem> {
     let Some(arg1) = state.args.get(0) else {
         eprintln!("Arg #1 is missing");
-        return None;
+        return Vec::new();
     };
 
     match arg1.get(0..1) {
         Some("@") => {
             let Some(s) = arg1.get(1..) else {
                 eprintln!("Wrong format for Arg #1: @N expected");
-                return None;
+                return Vec::new();
             };
 
-            let i: usize = s.parse().unwrap();
-            match i {
-                0 => return Some(&mut state.data_list),
+            let mut iter = s.split("{");
+            let Some(number_str) = iter.next() else {
+                eprintln!("Wrong arg format");
+                return Vec::new();
+            };
+            let i: usize = number_str.parse().unwrap();
+
+            let list_to_return = match i {
+                0 => &mut state.data_list,
                 _ => {
                     let ListItem::List(ref mut ls) = state.data_list else {
                         eprintln!("Expected list, got string");
-                        return None;
+                        return Vec::new();
                     };
                     let Some(l) = ls.get_mut(i - 1) else {
-                        eprintln!("List {} is missing", i);
-                        return None;
+                        eprintln!("List #{} is missing", i);
+                        return Vec::new();
                     };
-                    return Some(l);
+                    l
                 }
-            }
+            };
+            // if @N{a,b,c}
+            let Some(keys) = iter.next() else {
+                return vec![list_to_return];
+            };
+            let iter = keys.split(|c| c == ',' || c == '}');
+            let mut keys_to_test: Vec<&str> = iter.collect();
+            keys_to_test.remove(keys_to_test.len() - 1);
+            let ListItem::List(ls) = list_to_return else {
+                eprintln!("Expect list, got string");
+                return Vec::new();
+            };
+            return ls
+                .iter_mut()
+                .filter(|item| {
+                    let ListItem::Str(item_str) = item else {
+                        return false;
+                    };
+                    return keys_to_test.contains(&item_str.as_str());
+                })
+                .collect();
         }
         _ => {
             eprintln!("Wrong format for Arg #1: @N expected");
-            return None;
+            return Vec::new();
         }
     };
 }
@@ -163,7 +220,8 @@ fn print_list_item(list_item: &ListItem, max_str_size: Option<usize>) {
 
 // @1 print full
 fn print_data_list(state: &mut State) {
-    let Some(list_item) = get_arg1_list(state) else {
+    let arg1_list = get_arg1_list(state);
+    let Some(list_item) = arg1_list.get(0) else {
         return;
     };
 
@@ -211,11 +269,12 @@ fn split(state: &mut State) {
         }
     };
 
-    let Some(list_to_process) = get_arg1_list(state) else {
+    let arg_list = get_arg1_list(state);
+    let Some(item_to_process) = arg_list.get(0) else {
         return;
     };
 
-    let ListItem::Str(str_to_process) = list_to_process else {
+    let ListItem::Str(str_to_process) = item_to_process else {
         eprintln!("Expected string, got list");
         return;
     };
@@ -237,10 +296,11 @@ fn split(state: &mut State) {
             return;
         }
     };
-    let Some(list_to_change) = get_arg1_list_mut(state) else {
+    let mut arg_list = get_arg1_list_mut(state);
+    let Some(item_to_process) = arg_list.get_mut(0) else {
         return;
     };
-    *list_to_change = ListItem::List(new_list);
+    **item_to_process = ListItem::List(new_list);
 }
 
 // Leave only specific list items
@@ -254,10 +314,15 @@ fn only(state: &mut State) {
 // Example:
 // - @1 trim
 fn trim(state: &mut State) {
-    let Some(list_to_change) = get_arg1_list_mut(state) else {
+    let mut arg_list = get_arg1_list_mut(state);
+    if arg_list.len() > 1 {
+        return;
+    }
+    let Some(list_item) = arg_list.get_mut(0) else {
         return;
     };
-    let ListItem::List(list_to_change) = list_to_change else {
+
+    let ListItem::List(list_to_change) = list_item else {
         eprintln!("Expected list, got string");
         return;
     };
@@ -273,6 +338,13 @@ fn trim(state: &mut State) {
         }
         ListItem::List(_) => return true,
     });
+}
+
+// Take matching items and their next items
+// Example:
+// - @0{target,charges,maxCharges} and_next_only
+fn and_next_only(state: &mut State) {
+    let arg1_list = get_arg1_list_mut(state);
 }
 
 fn process_input(input: String, state: &mut State) {
@@ -305,6 +377,7 @@ fn process_input(input: String, state: &mut State) {
         "spl" => split(state),
         "only" => only(state),
         "trim" => trim(state),
+        "and_next_only" => and_next_only(state),
         _ => eprintln!("Unknown function name: {}", function_name),
     };
 }
