@@ -1,5 +1,7 @@
 tests/in_1.txt fread
 @0 spl seq ({
 @2 only
-@1 spl any :,
-@0{target,charges,maxCharges} and_next_only
+@0 spl any :,'"
+@0 trim
+@0{targets,charges,maxCharges} and_next_only
+@0 to_json
