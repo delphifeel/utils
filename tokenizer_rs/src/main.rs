@@ -1,5 +1,7 @@
-use std::fs::File;
-use std::io::{stdin, stdout, Read, Write};
+use std::fs::{DirEntry, File};
+use std::io::{stdin, stdout, Read, Seek, SeekFrom, Write};
+use std::path::Path;
+use std::{env, fs};
 
 #[derive(Debug)]
 enum ListItem {
@@ -16,14 +18,14 @@ fn read_file(file_name: &str) -> Option<String> {
     let mut file = match File::open(file_name) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("Error reading file: {}", e);
+            eprintln!("Error reading `{file_name}`: {}", e);
             return None;
         }
     };
     let mut contents = String::new();
     match file.read_to_string(&mut contents) {
         Err(e) => {
-            eprintln!("Error reading file: {}", e);
+            eprintln!("Error reading `{file_name}`: {}", e);
             return None;
         }
         Ok(_) => {}
@@ -462,7 +464,7 @@ fn to_json(state: &mut State) {
     state.data_list = ListItem::Str(json_str);
 }
 
-fn process_input(input: String, state: &mut State) {
+fn process_input(input: &str, state: &mut State) {
     // convert to state
     let mut iter = input.split(" ");
     let arg1 = match iter.next() {
@@ -498,24 +500,95 @@ fn process_input(input: String, state: &mut State) {
     };
 }
 
-fn main() {
-    let mut state = State {
-        args: Vec::new(),
-        data_list: ListItem::Str(String::new()),
+fn process_dirs(src_dir: String, dest_dir: String, cmds_file: String) {
+    let Some(cmds_str) = read_file(&cmds_file) else {
+        eprintln!("Command file doesn't exist: {cmds_file}");
+        return;
     };
 
-    loop {
-        print!("> ");
-        let _ = stdout().flush();
-        let mut line = String::new();
-        stdin().read_line(&mut line).unwrap();
-        line = line.trim().to_owned();
-
-        if line == "q" {
-            break;
+    let src_dir_v = match fs::read_dir(&src_dir) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Read {src_dir} error: {e}");
+            return;
         }
+    };
 
-        process_input(line, &mut state);
+    for entry in src_dir_v {
+        let Ok(entry) = entry else {
+            eprintln!("Entry error");
+            continue;
+        };
+        let path = entry.path();
+        if path.is_dir() {
+            // TODO (delphifeel): recursive processint
+            continue;
+        }
+        process_file(entry, &cmds_str, &dest_dir);
+    }
+}
+
+fn process_file(entry: DirEntry, cmds_str: &str, dest_dir: &str) {
+    let file_path = entry.path();
+    let Some(src_file_content) = read_file(file_path.to_str().unwrap()) else {
+        return;
+    };
+
+    let mut state = State {
+        args: Vec::new(),
+        data_list: ListItem::Str(src_file_content),
+    };
+    for l in cmds_str.lines() {
+        process_input(l, &mut state);
+    }
+    let ListItem::Str(state_str) = state.data_list else {
+        eprintln!("Expected data list to be string");
+        return;
+    };
+    dbg!(&state_str);
+
+    let dest_file = Path::new(dest_dir).join(entry.file_name());
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(&dest_file)
+        .unwrap();
+    file.seek(SeekFrom::Start(0)).unwrap();
+    file.write_all(state_str.as_bytes()).unwrap();
+    println!("{} created", dest_file.display());
+}
+
+fn main() {
+    let mut args = env::args();
+    args.next();
+
+    let src_dir = args.next();
+    let dest_dir = args.next();
+    let cmds = args.next();
+
+    match (src_dir, dest_dir, cmds) {
+        (Some(src_dir_v), Some(dest_dir_v), Some(cmds_file)) => {
+            process_dirs(src_dir_v, dest_dir_v, cmds_file);
+        }
+        _ => {
+            let mut state = State {
+                args: Vec::new(),
+                data_list: ListItem::Str(String::new()),
+            };
+            loop {
+                print!("> ");
+                let _ = stdout().flush();
+                let mut line = String::new();
+                stdin().read_line(&mut line).unwrap();
+                line = line.trim().to_owned();
+
+                if line == "q" {
+                    break;
+                }
+
+                process_input(&line, &mut state);
+            }
+        }
     }
 }
 
@@ -530,7 +603,7 @@ mod tests {
         };
 
         for line in read_file("tests/cmds_1.txt").unwrap().lines() {
-            process_input(line.to_owned(), &mut state);
+            process_input(line, &mut state);
         }
 
         let expected = read_file("tests/out_1.txt").unwrap();
