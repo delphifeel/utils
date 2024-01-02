@@ -50,9 +50,8 @@ result will be:
 At any given point of time, we have state that can be `list` or `string` (`list item`)
 Every `list item` can have other `lists` or `strings`.
 
-Every command have a format of:
-`arg1 function arg2 arg3 argN`
-All things separated with `space`
+Every command have a format of: `arg1 function arg2 arg3 argN`.
+All things separated with `space`.
 `arg1` is special argument that works as a selector of list:
 
 - `@0`: select main list
