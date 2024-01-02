@@ -597,9 +597,11 @@ mod tests {
     use super::*;
     #[test]
     fn process_file_of_cmds() {
+        let in_content = read_file("tests/in_1.txt").unwrap();
+
         let mut state = State {
             args: Vec::new(),
-            data_list: ListItem::Str(String::new()),
+            data_list: ListItem::Str(in_content),
         };
 
         for line in read_file("tests/cmds_1.txt").unwrap().lines() {
